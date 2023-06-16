@@ -259,7 +259,7 @@ pub async fn download_block(
         .post(&bitcoin_config.rpc_url)
         .basic_auth(&bitcoin_config.username, Some(&bitcoin_config.password))
         .header("Content-Type", "application/json")
-        .header("Host", &bitcoin_config.rpc_url[7..])
+        // .header("Host", &bitcoin_config.rpc_url[7..])
         .json(&body)
         .send()
         .await
@@ -310,7 +310,7 @@ pub async fn retrieve_block_hash(
         .post(&bitcoin_config.rpc_url)
         .basic_auth(&bitcoin_config.username, Some(&bitcoin_config.password))
         .header("Content-Type", "application/json")
-        .header("Host", &bitcoin_config.rpc_url[7..])
+        // .header("Host", &bitcoin_config.rpc_url[7..])
         .json(&body)
         .send()
         .await
