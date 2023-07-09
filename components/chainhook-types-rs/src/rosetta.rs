@@ -311,13 +311,12 @@ pub enum OrdinalOperation {
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct OrdinalInscriptionTransferData {
-    pub inscription_number: i64,
     pub inscription_id: String,
-    pub ordinal_number: u64,
     pub updated_address: Option<String>,
     pub satpoint_pre_transfer: String,
     pub satpoint_post_transfer: String,
     pub post_transfer_output_value: Option<u64>,
+    pub tx_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -341,6 +340,7 @@ pub struct OrdinalInscriptionRevealData {
     pub ordinal_number: u64,
     pub ordinal_block_height: u64,
     pub ordinal_offset: u64,
+    pub tx_index: usize,
     pub transfers_pre_inscription: u32,
     pub satpoint_post_inscription: String,
     pub curse_type: Option<OrdinalInscriptionCurseType>,
@@ -407,7 +407,7 @@ pub struct LockSTXData {
 
 /// The transaction_identifier uniquely identifies a transaction in a particular
 /// network and block or in the mempool.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Hash, PartialOrd, Ord)]
 pub struct TransactionIdentifier {
     /// Any transactions that are attributable only to a block (ex: a block
     /// event) should use the hash of the block as the identifier.
@@ -415,6 +415,16 @@ pub struct TransactionIdentifier {
 }
 
 impl TransactionIdentifier {
+    pub fn new(txid: &str) -> Self {
+        let lowercased_txid = txid.to_lowercase();
+        Self {
+            hash: match lowercased_txid.starts_with("0x") {
+                true => lowercased_txid,
+                false => format!("0x{}", lowercased_txid),
+            },
+        }
+    }
+
     pub fn get_hash_bytes_str(&self) -> &str {
         &self.hash[2..]
     }
@@ -875,8 +885,23 @@ impl BitcoinNetwork {
 
 #[derive(Deserialize, Debug, Clone)]
 pub enum BitcoinBlockSignaling {
-    Stacks(String),
+    Stacks(StacksNodeConfig),
     ZeroMQ(String),
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct StacksNodeConfig {
+    pub rpc_url: String,
+    pub ingestion_port: u16,
+}
+
+impl StacksNodeConfig {
+    pub fn default_localhost(ingestion_port: u16) -> StacksNodeConfig {
+        StacksNodeConfig {
+            rpc_url: "http://localhost:20443".to_string(),
+            ingestion_port,
+        }
+    }
 }
 
 impl BitcoinBlockSignaling {

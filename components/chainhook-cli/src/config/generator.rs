@@ -1,4 +1,7 @@
-pub fn generate_config() -> String {
+use chainhook_types::BitcoinNetwork;
+
+pub fn generate_config(network: &BitcoinNetwork) -> String {
+    let network = format!("{:?}", network);
     let conf = format!(
         r#"[storage]
 working_dir = "cache"
@@ -12,11 +15,17 @@ working_dir = "cache"
 # database_uri = "redis://localhost:6379/"
 
 [network]
-mode = "mainnet"
+mode = "{network}"
 bitcoind_rpc_url = "http://localhost:8332"
 bitcoind_rpc_username = "devnet"
 bitcoind_rpc_password = "devnet"
+# Bitcoin block events can be received by Chainhook
+# either through a Bitcoin node's ZeroMQ interface,
+# or through the Stacks node. The Stacks node is
+# used by default:
 stacks_node_rpc_url = "http://localhost:20443"
+# but zmq can be used instead:
+# bitcoind_zmq_url = "http://0.0.0.0:18543"
 
 [limits]
 max_number_of_bitcoin_predicates = 100
@@ -28,8 +37,9 @@ max_number_of_networking_threads = 16
 max_caching_memory_size_mb = 32000
 
 [[event_source]]
-tsv_file_url = "https://archive.hiro.so/mainnet/stacks-blockchain-api/mainnet-stacks-blockchain-api-latest"
-"#
+tsv_file_url = "https://archive.hiro.so/{network}/stacks-blockchain-api/{network}-stacks-blockchain-api-latest"
+"#,
+        network = network.to_lowercase(),
     );
     return conf;
 }

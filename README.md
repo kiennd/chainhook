@@ -47,7 +47,6 @@ The current `bitcoin` predicates support the following `if_this` constructs:
 
 // Get any transaction, including an OP_RETURN output starting with a set of characters.
 // `starts_with` mandatory argument admits:
-//  - ASCII string type. example: `X2[`
 //  - hex encoded bytes. example: `0x589403`
 {
     "if_this": {
@@ -72,7 +71,6 @@ The current `bitcoin` predicates support the following `if_this` constructs:
 
 // Get any transaction including an OP_RETURN output ending with a set of characters 
 // `ends_with` mandatory argument admits:
-//  - ASCII string type. example: `X2[`
 //  - hex encoded bytes. example: `0x589403`
 {
     "if_this": {
@@ -86,22 +84,24 @@ The current `bitcoin` predicates support the following `if_this` constructs:
 // Get any transaction including a p2pkh output paying a given recipient
 // `p2pkh` construct admits:
 //  - string type. example: "mr1iPkD9N3RJZZxXRk7xF9d36gffa6exNC"
-//  - hex encoded bytes type. example: "0x76a914ee9369fb719c0ba43ddf4d94638a970b84775f4788ac" 
 {
     "if_this": {
         "scope": "outputs",
-        "p2pkh": "mr1iPkD9N3RJZZxXRk7xF9d36gffa6exNC"
+        "p2pkh": {
+            "equals": "mr1iPkD9N3RJZZxXRk7xF9d36gffa6exNC"
+        }
     }
 }
 
 // Get any transaction including a p2sh output paying a given recipient
 // `p2sh` construct admits:
 //  - string type. example: "2MxDJ723HBJtEMa2a9vcsns4qztxBuC8Zb2"
-//  - hex encoded bytes type. example: "0x76a914ee9369fb719c0ba43ddf4d94638a970b84775f4788ac"
 {
     "if_this": {
         "scope": "outputs",
-        "p2sh": "2MxDJ723HBJtEMa2a9vcsns4qztxBuC8Zb2"
+        "p2sh": {
+          "equals": "2MxDJ723HBJtEMa2a9vcsns4qztxBuC8Zb2"
+        }
     }
 }
 
@@ -111,7 +111,9 @@ The current `bitcoin` predicates support the following `if_this` constructs:
 {
     "if_this": {
         "scope": "outputs",
-        "p2wpkh": "bcrt1qnxknq3wqtphv7sfwy07m7e4sr6ut9yt6ed99jg"
+        "p2wpkh": {
+          "equals": "bcrt1qnxknq3wqtphv7sfwy07m7e4sr6ut9yt6ed99jg"
+        }
     }
 }
 
@@ -121,7 +123,9 @@ The current `bitcoin` predicates support the following `if_this` constructs:
 {
     "if_this": {
         "scope": "outputs",
-        "p2wsh": "bc1qklpmx03a8qkv263gy8te36w0z9yafxplc5kwzc"
+        "p2wsh": {
+          "equals": "bc1qklpmx03a8qkv263gy8te36w0z9yafxplc5kwzc"
+        }
     }
 }
 
@@ -138,7 +142,7 @@ The current `bitcoin` predicates support the following `if_this` constructs:
 {
     "if_this": {
         "scope": "stacks_protocol",
-        "operation": "leader_key_registered"
+        "operation": "leader_registered"
     }
 }
 
@@ -427,11 +431,10 @@ The current `stacks` predicates support the following `if_this` constructs:
 
 // Get any transaction moving STX tokens
 // `actions` mandatory argument admits:
-//  - array of string type constrained to `mint`, `transfer`, and `lock` values. example: ["mint", "lock"]
+//  - array of string type constrained to `mint`, `transfer`, `burn`, and `lock` values. example: ["mint", "lock"]
 {
     "if_this": {
         "scope": "stx_event",
-        "asset_identifier": "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.monkey-sip09::monkeys",
         "actions": ["transfer", "lock"]
     },
 }

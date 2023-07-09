@@ -2,6 +2,8 @@ mod http_api;
 mod runloops;
 
 use crate::config::{Config, PredicatesApi, PredicatesApiConfig};
+use crate::hord::should_sync_hord_db;
+use crate::scan::bitcoin::process_block_with_predicates;
 use crate::scan::stacks::consolidate_local_stacks_chainstate_using_csv;
 use crate::service::http_api::{load_predicates_from_redis, start_predicate_api_server};
 use crate::service::runloops::{start_bitcoin_scan_runloop, start_stacks_scan_runloop};
@@ -9,7 +11,9 @@ use crate::storage::{
     confirm_entries_in_stacks_blocks, draft_entries_in_stacks_blocks, open_readwrite_stacks_db_conn,
 };
 
-use chainhook_sdk::chainhooks::types::{ChainhookConfig, ChainhookFullSpecification};
+use chainhook_sdk::chainhooks::types::{
+    BitcoinChainhookSpecification, ChainhookConfig, ChainhookFullSpecification,
+};
 
 use chainhook_sdk::chainhooks::types::ChainhookSpecification;
 use chainhook_sdk::observer::{start_event_observer, ObserverEvent};
@@ -107,28 +111,77 @@ impl Service {
         };
 
         // Download and ingest a Stacks dump
-        let _ = consolidate_local_stacks_chainstate_using_csv(&mut self.config, &self.ctx).await;
+        if self.config.rely_on_remote_stacks_tsv() {
+            let _ =
+                consolidate_local_stacks_chainstate_using_csv(&mut self.config, &self.ctx).await;
+        }
 
         // Download and ingest a Ordinal dump, if hord is enabled
         if !hord_disabled {
             // TODO: add flag
             // let _ = download_ordinals_dataset_if_required(&mut self.config, &self.ctx).await;
-        }
-
-        // Start chainhook event observer
-        let context_cloned = self.ctx.clone();
-        let event_observer_config_moved = event_observer_config.clone();
-        let observer_command_tx_moved = observer_command_tx.clone();
-        let _ = hiro_system_kit::thread_named("Chainhook event observer").spawn(move || {
-            let future = start_event_observer(
-                event_observer_config_moved,
-                observer_command_tx_moved,
-                observer_command_rx,
-                Some(observer_event_tx),
-                context_cloned,
+            info!(
+                self.ctx.expect_logger(),
+                "Ordinal indexing is enabled by default, checking index... (use --no-hord to disable ordinals)"
             );
-            let _ = hiro_system_kit::nestable_block_on(future);
-        });
+
+            if let Some((start_block, end_block)) = should_sync_hord_db(&self.config, &self.ctx)? {
+                if start_block == 0 {
+                    info!(
+                        self.ctx.expect_logger(),
+                        "Initializing hord indexing from block #{}", start_block
+                    );
+                } else {
+                    info!(
+                        self.ctx.expect_logger(),
+                        "Resuming hord indexing from block #{}", start_block
+                    );
+                }
+
+                let (tx, rx) = channel();
+
+                let mut moved_event_observer_config = event_observer_config.clone();
+                let moved_ctx = self.ctx.clone();
+
+                let _ = hiro_system_kit::thread_named("Initial predicate processing")
+                    .spawn(move || {
+                        if let Some(mut chainhook_config) =
+                            moved_event_observer_config.chainhook_config.take()
+                        {
+                            let mut bitcoin_predicates_ref: Vec<&BitcoinChainhookSpecification> =
+                                vec![];
+                            for bitcoin_predicate in chainhook_config.bitcoin_chainhooks.iter_mut()
+                            {
+                                bitcoin_predicate.enabled = false;
+                                bitcoin_predicates_ref.push(bitcoin_predicate);
+                            }
+                            while let Ok(block) = rx.recv() {
+                                let future = process_block_with_predicates(
+                                    block,
+                                    &bitcoin_predicates_ref,
+                                    &moved_event_observer_config,
+                                    &moved_ctx,
+                                );
+                                let res = hiro_system_kit::nestable_block_on(future);
+                                if let Err(_) = res {
+                                    error!(moved_ctx.expect_logger(), "Initial ingestion failing");
+                                }
+                            }
+                        }
+                    })
+                    .expect("unable to spawn thread");
+
+                crate::hord::perform_hord_db_update(
+                    start_block,
+                    end_block,
+                    &self.config.get_hord_config(),
+                    &self.config,
+                    Some(tx),
+                    &self.ctx,
+                )
+                .await?;
+            }
+        }
 
         // Stacks scan operation threadpool
         let (stacks_scan_op_tx, stacks_scan_op_rx) = crossbeam_channel::unbounded();
@@ -162,6 +215,22 @@ impl Service {
             })
             .expect("unable to spawn thread");
 
+        // Enable HTTP Predicates API, if required
+        if let PredicatesApi::On(ref api_config) = self.config.http_api {
+            info!(
+                self.ctx.expect_logger(),
+                "Listening on port {} for chainhook predicate registrations", api_config.http_port
+            );
+            let ctx = self.ctx.clone();
+            let api_config = api_config.clone();
+            let moved_observer_command_tx = observer_command_tx.clone();
+            // Test and initialize a database connection
+            let _ = hiro_system_kit::thread_named("HTTP Predicate API").spawn(move || {
+                let future = start_predicate_api_server(api_config, moved_observer_command_tx, ctx);
+                let _ = hiro_system_kit::nestable_block_on(future);
+            });
+        }
+
         info!(
             self.ctx.expect_logger(),
             "Listening on port {} for Stacks chain events", event_observer_config.ingestion_port
@@ -174,26 +243,33 @@ impl Service {
                 );
             }
             BitcoinBlockSignaling::Stacks(ref _url) => {
+                // Start chainhook event observer
+                let context_cloned = self.ctx.clone();
+                let event_observer_config_moved = event_observer_config.clone();
+                let observer_command_tx_moved = observer_command_tx.clone();
+                let _ =
+                    hiro_system_kit::thread_named("Chainhook event observer").spawn(move || {
+                        let future = start_event_observer(
+                            event_observer_config_moved,
+                            observer_command_tx_moved,
+                            observer_command_rx,
+                            Some(observer_event_tx),
+                            context_cloned,
+                        );
+                        let _ = hiro_system_kit::nestable_block_on(future);
+                    });
+                info!(
+                    self.ctx.expect_logger(),
+                    "Listening on port {} for Stacks chain events",
+                    event_observer_config
+                        .get_stacks_node_config()
+                        .ingestion_port
+                );
                 info!(
                     self.ctx.expect_logger(),
                     "Observing Bitcoin chain events via Stacks node"
                 );
             }
-        }
-        // Enable HTTP Chainhook API, if required
-        if let PredicatesApi::On(ref api_config) = self.config.http_api {
-            info!(
-                self.ctx.expect_logger(),
-                "Listening for chainhook predicate registrations on port {}", api_config.http_port
-            );
-            let ctx = self.ctx.clone();
-            let api_config = api_config.clone();
-            let moved_observer_command_tx = observer_command_tx.clone();
-            // Test and initialize a database connection
-            let _ = hiro_system_kit::thread_named("HTTP Predicate API").spawn(move || {
-                let future = start_predicate_api_server(api_config, moved_observer_command_tx, ctx);
-                let _ = hiro_system_kit::nestable_block_on(future);
-            });
         }
 
         let mut stacks_event = 0;
@@ -212,7 +288,7 @@ impl Service {
             match event {
                 ObserverEvent::PredicateRegistered(spec) => {
                     // If start block specified, use it.
-                    // I no start block specified, depending on the nature the hook, we'd like to retrieve:
+                    // If no start block specified, depending on the nature the hook, we'd like to retrieve:
                     // - contract-id
                     if let PredicatesApi::On(ref config) = self.config.http_api {
                         let mut predicates_db_conn = match open_readwrite_predicates_db_conn(config)

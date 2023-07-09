@@ -54,7 +54,7 @@ pub enum BitcoinChainhookOccurrence {
 
 pub fn evaluate_bitcoin_chainhooks_on_chain_event<'a>(
     chain_event: &'a BitcoinChainEvent,
-    active_chainhooks: Vec<&'a BitcoinChainhookSpecification>,
+    active_chainhooks: &Vec<&'a BitcoinChainhookSpecification>,
     ctx: &Context,
 ) -> (
     Vec<BitcoinTriggerChainhook<'a>>,
@@ -158,6 +158,7 @@ pub fn serialize_bitcoin_payload_to_json<'a>(
         "chainhook": {
             "uuid": trigger.chainhook.uuid,
             "predicate": trigger.chainhook.predicate,
+            "is_streaming_blocks": trigger.chainhook.enabled
         }
     })
 }
@@ -180,7 +181,7 @@ pub fn serialize_bitcoin_transactions_to_json<'a>(
                         .iter()
                         .map(|input| {
                             json!({
-                                "txin": format!("0x{}", input.previous_output.txid),
+                                "txin": input.previous_output.txid.hash.to_string(),
                                 "vout": input.previous_output.vout,
                                 "sequence": input.sequence,
                             })
@@ -366,7 +367,7 @@ impl BitcoinPredicateType {
             BitcoinPredicateType::Inputs(InputPredicate::Txid(predicate)) => {
                 // TODO(lgalabru): add support for transaction chainhing, if enabled
                 for input in tx.metadata.inputs.iter() {
-                    if input.previous_output.txid.eq(&predicate.txid)
+                    if input.previous_output.txid.hash.eq(&predicate.txid)
                         && input.previous_output.vout.eq(&predicate.vout)
                     {
                         return true;
